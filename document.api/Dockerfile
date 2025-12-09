@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/*
 
 # Copiar requirements y instalar dependencias de Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt.dev .
+RUN pip install --no-cache-dir -r requirements.txt.dev
 
 # Copiar el código de la aplicación
 COPY . .
