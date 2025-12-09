@@ -19,6 +19,13 @@ from app.functions import upload_file_to_s3, validate_csv_file
 from app.config import settings
 from datetime import timedelta
 import logging
+from pydantic import BaseModel
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,48 +46,48 @@ async def get_current_user(
         detail="No se pudieron validar las credenciales",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     payload = decode_token(token)
     if payload is None:
         raise credentials_exception
-    
+
     user_id_str = payload.get("sub")
     if user_id_str is None:
         raise credentials_exception
     user_id: int = int(user_id_str)
-    
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    
+
     if user is None:
         raise credentials_exception
-    
+
     return user
 
 
 @router.post("/login", summary="Inicio de sesión para usuarios anónimos")
 async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    login_data: LoginRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Endpoint de inicio de sesión que permite a usuarios anónimos iniciar sesión.
     Si el usuario no existe, se crea automáticamente con rol ANONYMOUS.
-    
+
     Devuelve un JWT con:
     - ID del usuario
     - Rol
     - Tiempo de expiración de 15 minutos
     """
     # Buscar usuario por username
-    result = await db.execute(select(User).where(User.username == form_data.username))
+    result = await db.execute(select(User).where(User.username == login_data.username))
     user = result.scalar_one_or_none()
-    
+
     # Si el usuario no existe, crear uno nuevo con rol ANONYMOUS
     if user is None:
         user = User(
-            username=form_data.username,
-            password_hash=get_password_hash(form_data.password),
+            username=login_data.username,
+            password_hash=get_password_hash(login_data.password),
             role=UserRole.ANONYMOUS
         )
         db.add(user)
@@ -89,12 +96,12 @@ async def login(
         logger.info(f"Usuario anónimo creado: {user.username}")
     else:
         # Verificar contraseña
-        if not verify_password(form_data.password, user.password_hash):
+        if not verify_password(login_data.password, user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Usuario o contraseña incorrectos"
             )
-    
+
     # Crear token de acceso
     access_token = create_access_token(
         data={
@@ -102,7 +109,7 @@ async def login(
             "role": user.role.value
         }
     )
-    
+
     # Crear token de refresco
     refresh_token = create_refresh_token(
         data={
@@ -110,7 +117,7 @@ async def login(
             "role": user.role.value
         }
     )
-    
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -130,25 +137,25 @@ async def upload_csv(
     """
     Endpoint para subir un archivo CSV junto con dos parámetros adicionales.
     El archivo se almacena en AWS S3 (o MinIO).
-    
+
     Requisitos:
     - El usuario debe estar autenticado
     - El archivo debe ser un CSV válido
     """
     # Leer el contenido del archivo
     file_content = await file.read()
-    
+
     # Validar que sea un CSV
     if not validate_csv_file(file_content, file.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El archivo debe ser un CSV válido"
         )
-    
+
     try:
         # Subir a S3
         s3_key = await upload_file_to_s3(file_content, file.filename)
-        
+
         # Registrar en la base de datos
         file_upload = FileUpload(
             filename=file.filename,
@@ -159,11 +166,11 @@ async def upload_csv(
             param1=param1,
             param2=param2
         )
-        
+
         db.add(file_upload)
         await db.commit()
         await db.refresh(file_upload)
-        
+
         return {
             "message": "Archivo subido correctamente",
             "file_id": file_upload.id,
@@ -172,7 +179,7 @@ async def upload_csv(
             "param1": param1,
             "param2": param2
         }
-        
+
     except Exception as e:
         logger.error(f"Error al subir archivo: {e}")
         raise HTTPException(
@@ -192,42 +199,42 @@ async def refresh_token(
     """
     # Decodificar el token de refresco
     payload = decode_token(refresh_token)
-    
+
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de refresco inválido o expirado"
         )
-    
+
     # Verificar que sea un token de refresco
     if payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token no es un token de refresco válido"
         )
-    
+
     # Obtener información del usuario
     user_id_str = payload.get("sub")
     role = payload.get("role")
-    
+
     if user_id_str is None or role is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de refresco inválido"
         )
-    
+
     user_id = int(user_id_str)
-    
+
     # Verificar que el usuario aún existe
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    
+
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario no encontrado"
         )
-    
+
     # Crear nuevo token de acceso
     new_access_token = create_access_token(
         data={
@@ -235,7 +242,7 @@ async def refresh_token(
             "role": user.role.value
         }
     )
-    
+
     # Crear nuevo token de refresco
     new_refresh_token = create_refresh_token(
         data={
@@ -243,7 +250,7 @@ async def refresh_token(
             "role": user.role.value
         }
     )
-    
+
     return {
         "access_token": new_access_token,
         "refresh_token": new_refresh_token,
@@ -265,4 +272,3 @@ async def get_current_user_info(
         "email": current_user.email,
         "role": current_user.role.value
     }
-
