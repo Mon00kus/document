@@ -1,23 +1,32 @@
-version: '3.8'
+#version: '3.8'
 
 services:
-  # Base de datos PostgreSQL
-  postgres:
-    image: postgres:15-alpine
-    container_name: document_postgres
+  # SQL Server
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: document_mssql
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: documentdb
+      - ACCEPT_EULA=Y
+      - "MSSQL_SA_PASSWORD=documentPassword123"
     ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - "1433:1433"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'documentPassword123' -C -Q 'SELECT 1' || exit 1" ]
       interval: 10s
-      timeout: 5s
       retries: 5
+      start_period: 10s
+    volumes:
+      - mssql_data:/var/opt/mssql
+
+  # Servicio para crear la BD en MSSQL
+  mssql-setup:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: document_mssql_setup
+    depends_on:
+      mssql:
+        condition: service_healthy
+    command: >
+      /bin/bash -c " /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P documentPassword123 -C -Q \"IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'documentdb') BEGIN CREATE DATABASE documentdb; END\" "
 
   # MinIO (simula AWS S3)
   minio:
@@ -33,7 +42,7 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -45,25 +54,19 @@ services:
     depends_on:
       - minio
     entrypoint: >
-      /bin/sh -c "
-      sleep 10;
-      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
-      /usr/bin/mc mb myminio/documents --ignore-existing;
-      /usr/bin/mc anonymous set download myminio/documents;
-      exit 0;
-      "
+      /bin/sh -c " sleep 10; /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin; /usr/bin/mc mb myminio/documents --ignore-existing; /usr/bin/mc anonymous set download myminio/documents; exit 0; "
 
   # API FastAPI
   api:
     build: .
     container_name: document_api
     depends_on:
-      postgres:
+      mssql:
         condition: service_healthy
       minio:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/documentdb
+      DATABASE_URL: "mssql+aioodbc://sa:documentPassword123@mssql:1433/documentdb?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
       SECRET_KEY: 09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7
       S3_ENDPOINT_URL: http://minio:9000
       S3_ACCESS_KEY_ID: minioadmin
@@ -78,7 +81,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
-  postgres_data:
+  mssql_data:
   minio_data:
 
 

@@ -91,8 +91,12 @@ async def login(
             role=UserRole.ANONYMOUS
         )
         db.add(user)
-        await db.commit()
-        await db.refresh(user)
+        try:
+            await db.commit()
+            await db.refresh(user)
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
         logger.info(f"Usuario anónimo creado: {user.username}")
     else:
         # Verificar contraseña

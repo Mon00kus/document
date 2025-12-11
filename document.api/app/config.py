@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Configuración de la aplicación"""
     
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/documentdb"
+    DATABASE_URL: str = "mssql+aioodbc://sa:documentPassword123!@localhost:1433/documentdb?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
     
     # JWT
     SECRET_KEY: str = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
