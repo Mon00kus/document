@@ -13,7 +13,8 @@ Base = declarative_base()
 
 # Motor de base de datos asíncrono
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    #settings.DATABASE_URL,
+    settings.ASYNC_DATABASE_URL,
     echo=True,
     future=True
 )
@@ -48,5 +49,3 @@ async def init_db():
     except Exception as e:
         logger.error(f"Error al inicializar la base de datos: {e}")
         raise
-
-

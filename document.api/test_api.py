@@ -2,6 +2,7 @@
 Script de ejemplo para probar la API
 Ejecutar después de iniciar los servicios con docker-compose
 """
+
 import requests
 import json
 
@@ -12,11 +13,7 @@ def test_login():
     """Prueba el endpoint de login"""
     print("=== Probando Login ===")
     response = requests.post(
-        f"{BASE_URL}/login",
-        data={
-            "username": "testuser",
-            "password": "testpass123"
-        }
+        f"{BASE_URL}/login", json={"username": "testuser", "password": "testpass123"}
     )
     print(f"Status: {response.status_code}")
     print(f"Response: {json.dumps(response.json(), indent=2)}")
@@ -30,22 +27,12 @@ def test_upload_csv(token):
     # Crear un archivo CSV de ejemplo
     csv_content = "nombre,edad,ciudad\nJuan,25,Madrid\nMaría,30,Barcelona"
 
-    files = {
-        'file': ('test.csv', csv_content, 'text/csv')
-    }
-    data = {
-        'param1': 'valor1',
-        'param2': 'valor2'
-    }
-    headers = {
-        'Authorization': f'Bearer {token}'
-    }
+    files = {"file": ("test.csv", csv_content, "text/csv")}
+    data = {"param1": "valor1", "param2": "valor2"}
+    headers = {"Authorization": f"Bearer {token}"}
 
     response = requests.post(
-        f"{BASE_URL}/upload-csv",
-        files=files,
-        data=data,
-        headers=headers
+        f"{BASE_URL}/upload-csv", files=files, data=data, headers=headers
     )
     print(f"Status: {response.status_code}")
     print(f"Response: {json.dumps(response.json(), indent=2)}")
@@ -55,10 +42,7 @@ def test_refresh_token(refresh_token):
     """Prueba el endpoint de renovación de token"""
     print("\n=== Probando Refresh Token ===")
     response = requests.post(
-        f"{BASE_URL}/refresh-token",
-        data={
-            "refresh_token": refresh_token
-        }
+        f"{BASE_URL}/refresh-token", data={"refresh_token": refresh_token}
     )
     print(f"Status: {response.status_code}")
     print(f"Response: {json.dumps(response.json(), indent=2)}")
@@ -68,13 +52,8 @@ def test_refresh_token(refresh_token):
 def test_me(token):
     """Prueba el endpoint de información del usuario"""
     print("\n=== Probando GET /me ===")
-    headers = {
-        'Authorization': f'Bearer {token}'
-    }
-    response = requests.get(
-        f"{BASE_URL}/me",
-        headers=headers
-    )
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(f"{BASE_URL}/me", headers=headers)
     print(f"Status: {response.status_code}")
     print(f"Response: {json.dumps(response.json(), indent=2)}")
 

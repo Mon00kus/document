@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import FileUpload from '../components/FileUpload';
+// eslint-disable-next-line no-unused-vars
 import { motion } from 'framer-motion';
 import { FileText, LogOut, LayoutDashboard, Database, DollarSign, Activity } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
 
 export default function Dashboard()
 {

@@ -7,11 +7,11 @@ services:
     container_name: document_mssql
     environment:
       - ACCEPT_EULA=Y
-      - "MSSQL_SA_PASSWORD=documentPassword123"
+      - "MSSQL_SA_PASSWORD=documentPassword123!"
     ports:
       - "1433:1433"
     healthcheck:
-      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'documentPassword123' -C -Q 'SELECT 1' || exit 1" ]
+      test: [ "CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'documentPassword123!' -C -Q 'SELECT 1' || exit 1" ]
       interval: 10s
       retries: 5
       start_period: 10s
@@ -26,35 +26,28 @@ services:
       mssql:
         condition: service_healthy
     command: >
-      /bin/bash -c " /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P documentPassword123 -C -Q \"IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'documentdb') BEGIN CREATE DATABASE documentdb; END\" "
+      /bin/bash -c " /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P 'documentPassword123!' -C -Q \"IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'documentdb') BEGIN CREATE DATABASE documentdb; END\" "
 
-  # MinIO (simula AWS S3)
-  minio:
-    image: minio/minio:latest
-    container_name: document_minio
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+  # LocalStack (S3 + Textract)
+  localstack:
+    image: localstack/localstack
+    container_name: document_localstack
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,textract
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  # Cliente MinIO para crear el bucket automáticamente
-  minio-setup:
-    image: minio/mc:latest
-    container_name: document_minio_setup
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c " sleep 10; /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin; /usr/bin/mc mb myminio/documents --ignore-existing; /usr/bin/mc anonymous set download myminio/documents; exit 0; "
+      test: [ "CMD", "curl", "-f", "http://localhost:4566/_localstack/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - "./.docker/localstack-init:/etc/localstack/init/ready.d"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - localstack_data:/var/lib/localstack
 
   # API FastAPI
   api:
@@ -63,17 +56,14 @@ services:
     depends_on:
       mssql:
         condition: service_healthy
-      minio:
+      localstack:
         condition: service_healthy
+    env_file:
+      - .env.docker
     environment:
-      DATABASE_URL: "mssql+aioodbc://sa:documentPassword123@mssql:1433/documentdb?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
-      SECRET_KEY: 09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_ACCESS_KEY_ID: minioadmin
-      S3_SECRET_ACCESS_KEY: minioadmin
-      S3_BUCKET_NAME: documents
-      S3_REGION: us-east-1
-      S3_USE_SSL: "false"
+      # Ovrride specific vars if strictly necessary, but .env.docker should suffice.
+      # Ensuring AWS endpoint points to localstack service
+      AWS_ENDPOINT_URL: http://localstack:4566
     ports:
       - "8000:8000"
     volumes:
@@ -82,6 +72,4 @@ services:
 
 volumes:
   mssql_data:
-  minio_data:
-
-
+  localstack_data:
