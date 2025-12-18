@@ -6,7 +6,13 @@ WORKDIR /app
 # Instalar dependencias del sistema y drivers ODBC para SQL Server
 # Instalar dependencias del sistema y drivers ODBC para SQL Server
 # Debian 12 (Bookworm) is the base for python:3.11-slim
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y locales \
+  tesseract-ocr \
+  poppler-utils \
+  libglib2.0-0 \
+  libsm6 \
+  libxrender1 \
+  libxext6 \
   curl \
   gnupg2 \
   gcc \
@@ -16,7 +22,11 @@ RUN apt-get update && apt-get install -y \
   && curl https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list \
   && apt-get update \
   && ACCEPT_EULA=Y apt-get install -y msodbcsql18 \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && sed -i '/es_ES.UTF-8/s/^ \   # //g' /etc/locale.gen \ 
+  && locale-gen
+ENV LANG es_ES.UTF-8
+
 
 # Copiar requirements y instalar dependencias de Python
 COPY requirements.txt.dev .

@@ -42,8 +42,7 @@ class Settings(BaseSettings):
         "https://localhost:3000",
         "http://localhost:5173",
         "http://localhost:5002",
-        "https://localhost:5002",
-        "*",
+        "https://localhost:5002",        
     ]
 
     class Config:

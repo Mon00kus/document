@@ -1,15 +1,31 @@
 """
 Servicio de análisis de documentos con IA usando AWS Textract
 """
-
 import boto3
 import logging
 import re
+from PIL import Image, ImageOps, ImageFilter
+
+import io
+import pdfplumber
+
 from typing import Dict, Any, Tuple
 from app.config import settings
 from app.models import DocumentClassification
 
-logger = logging.getLogger(__name__)
+from pdf2image import convert_from_bytes
+import pytesseract
+import numpy as np
+
+import unicodedata
+
+
+#logger = logging.getLogger(__name__)
+logger = logging.getLogger("document_ai")  # o el nombre del módulo
+
+
+#pytesseract.pytesseract.tesseract_cmd = r"D:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = "tesseract"
 
 
 def get_textract_client():
@@ -26,88 +42,140 @@ def get_textract_client():
     )
 
 
-def extract_text_from_document(file_bytes: bytes) -> str:
+def preprocess_for_ocr(image: Image.Image) -> Image.Image:
+    # Eliminar canal alpha si existe
+    if image.mode in ("RGBA", "LA"):
+        bg = Image.new("RGB", image.size, (255, 255, 255))
+        bg.paste(image, mask=image.split()[-1])
+        image = bg
+    elif image.mode != "RGB":
+        image = image.convert("RGB")
+
+    # Convertir a escala de grises
+    image = image.convert("L")
+
+    # Aumentar resolución (hasta 2x, límite razonable)
+    scale = 2
+    image = image.resize(
+        (image.width * scale, image.height * scale), Image.LANCZOS)
+
+    # Contraste y nitidez
+    image = ImageOps.autocontrast(image)
+    image = image.filter(ImageFilter.UnsharpMask(
+        radius=2, percent=150, threshold=3))
+
+    # Binarización por umbral de Otsu (simple aproximación)
+    arr = np.array(image)
+    thresh = arr.mean()  # aproximación; para Otsu real usar skimage si lo tienes
+    binarized = (arr > thresh).astype(np.uint8) * 255
+    image = Image.fromarray(binarized, mode="L")
+
+    return image
+
+
+def extract_text_from_document(file_bytes: bytes, filename: str) -> str:
     """
-    Extrae texto de un documento usando AWS Textract
-
-    Args:
-        file_bytes: Contenido del archivo en bytes
-
-    Returns:
-        Texto extraído del documento
+    Extrae texto de un documento usando librerías locales:
+    - PDF → pdfplumber (texto embebido) o OCR con pdf2image
+    - Imagen (JPG/PNG) → pytesseract (OCR)
     """
     try:
-        textract_client = get_textract_client()
+        if filename.lower().endswith(".pdf"):
+            text = ""
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
 
-        response = textract_client.detect_document_text(Document={"Bytes": file_bytes})
+            if text.strip():
+                return text.strip()
 
-        # Extraer todo el texto de los bloques
-        text_lines = []
-        for block in response.get("Blocks", []):
-            if block["BlockType"] == "LINE":
-                text_lines.append(block["Text"])
+            # Si no hay texto embebido, usar OCR
+            images = convert_from_bytes(
+                file_bytes, dpi=300, poppler_path=r"D:\poppler-25.12.0\Library\bin")
+            ocr_text = ""
+            for img in images:
+                ocr_text += pytesseract.image_to_string(
+                    img, lang="spa+eng") + "\n"
 
-        full_text = "\n".join(text_lines)
-        logger.info(f"Texto extraído: {len(full_text)} caracteres")
+            return ocr_text.strip()
 
-        return full_text
+        else:  # Imagen (JPG, PNG)
+
+            image = Image.open(io.BytesIO(file_bytes))
+            image = preprocess_for_ocr(image)
+
+            # Configurar Tesseract: psm 6 (asume bloque uniforme), OEM 1 (LSTM)
+            config = "--psm 6 --oem 1"
+            text = pytesseract.image_to_string(
+                image, lang="spa+eng", config=config)  # .strip()
+
+            if len(text) < 60:
+                alt_config = "--psm 4 --oem 1"
+                text = pytesseract.image_to_string(
+                    image, lang="spa+eng", config=alt_config)  # .strip()
+
+            return text
 
     except Exception as e:
-        logger.error(f"Error al extraer texto con Textract: {e}")
-        # Fallback: retornar texto vacío si Textract falla
+        logger.error(f"Error al extraer texto: {e}")
         return ""
 
 
+def normalize_text(text: str) -> str:
+    # Elimina acentos y caracteres especiales
+    norm = unicodedata.normalize("NFKD", text)
+    norm = "".join(c for c in norm if not unicodedata.combining(c))
+    # Sustituye símbolos raros por espacios
+    norm = re.sub(r"[^a-zA-Z0-9\s.,:/-]", " ", norm)
+    # Minúsculas y espacios colapsados
+    norm = " ".join(norm.lower().split())
+    return norm
+
+    """ norm = unicodedata.normalize("NFKD", text)
+    norm = "".join(c for c in norm if not unicodedata.combining(c))
+    norm = " ".join(norm.lower().split())
+    return norm """
+
+
 def classify_document(text: str) -> DocumentClassification:
-    """
-    Clasifica el documento como FACTURA o INFORMACION basándose en el contenido
+    text_lower = normalize_text(text)
 
-    Args:
-        text: Texto del documento
-
-    Returns:
-        Clasificación del documento
-    """
-    text_lower = text.lower()
-
-    # Palabras clave que indican una factura
     invoice_keywords = [
-        "factura",
-        "invoice",
-        "total",
-        "subtotal",
-        "iva",
-        "tax",
-        "precio",
-        "price",
-        "cantidad",
-        "quantity",
-        "proveedor",
-        "vendor",
-        "cliente",
-        "customer",
-        "payment",
-        "pago",
-        "bill",
-        "receipt",
-        "recibo",
-        "importe",
-        "amount",
+        "factura", "invoice", "comprobante", "orden de compra", "cotizacion",
+        "total", "subtotal", "iva", "tax", "precio", "price", "cantidad", "quantity",
+        "proveedor", "vendor", "cliente", "customer", "payment", "pago", "bill",
+        "recibo", "importe", "amount", "numero de factura", "fecha de emision",
+        "rif", "bs", "bolivares", "transferencia", "forma de pago"
     ]
 
-    # Contar cuántas palabras clave de factura aparecen
-    invoice_score = sum(1 for keyword in invoice_keywords if keyword in text_lower)
+    invoice_score = sum(
+        1 for keyword in invoice_keywords if keyword in text_lower)
 
-    # Si tiene 3 o más palabras clave de factura, clasificar como FACTURA
+    has_currency = bool(
+        re.search(r"(bs|bolivares|\$|€|£)\s*\d[\d.,]*", text_lower))
+    has_date = bool(
+        re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", text_lower))
+    has_invoice_number = bool(
+        re.search(r"(factura|invoice)[^\n]{0,40}\b[a-z0-9-]{3,}\b", text_lower))
+    has_amount_grid = len(re.findall(r"\b\d+[.,]\d{2}\b", text_lower)) >= 3
+
+    signals = sum([
+        invoice_score >= 3,
+        has_currency,
+        has_date,
+        has_invoice_number,
+        has_amount_grid
+    ])
+
+    if signals >= 3:
+        return DocumentClassification.FACTURA
+
     if invoice_score >= 3:
         return DocumentClassification.FACTURA
 
-    # Buscar patrones numéricos típicos de facturas (montos, fechas)
-    has_currency = bool(re.search(r"[\$€£]\s*\d+", text))
-    has_date = bool(re.search(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", text))
-    has_numbers = bool(re.search(r"\d+[.,]\d{2}", text))
-
-    if (has_currency or has_numbers) and has_date:
+    if (has_currency or has_amount_grid) and has_date:
         return DocumentClassification.FACTURA
 
     return DocumentClassification.INFORMACION
@@ -285,26 +353,26 @@ def generate_summary(text: str, max_length: int = 200) -> str:
 
 
 async def analyze_document(
-    file_bytes: bytes, filename: str
+    file_bytes: bytes, file_path: str
 ) -> Tuple[DocumentClassification, Dict[str, Any]]:
     """
-    Analiza un documento completo: extrae texto, clasifica y extrae datos
+    Analiza un documento completo: extrae texto, clasifica y extrae datos.
 
     Args:
         file_bytes: Contenido del archivo
-        filename: Nombre del archivo
+        file_path: Nombre del archivo
 
     Returns:
         Tupla con (clasificación, datos_extraídos)
     """
-    logger.info(f"Iniciando análisis de documento: {filename}")
+    logger.info(f"Iniciando análisis de documento: {file_path}")
 
-    # 1. Extraer texto
-    full_text = extract_text_from_document(file_bytes)
+    # 1. Extraer texto con OCR / pdfplumber
+    full_text = extract_text_from_document(file_bytes, file_path)
 
     if not full_text:
         logger.warning("No se pudo extraer texto del documento")
-        # Retornar clasificación por defecto
+											 
         return DocumentClassification.INFORMACION, {
             "full_text": "",
             "description": "No se pudo extraer texto del documento",
@@ -314,22 +382,27 @@ async def analyze_document(
 
     # 2. Clasificar documento
     classification = classify_document(full_text)
+    logger.info(f"OCR length: {len(full_text)}")
+    logger.info(f"OCR preview:\n{full_text[:500]}")
     logger.info(f"Documento clasificado como: {classification.value}")
 
     # 3. Extraer datos según clasificación
-    extracted_data = {"full_text": full_text}
+    extracted_data: Dict[str, Any] = {"full_text": full_text}
 
     if classification == DocumentClassification.FACTURA:
-        # Extraer datos de factura
+								  
         invoice_data = extract_invoice_data(full_text)
         extracted_data.update(invoice_data)
 
     else:  # INFORMACION
-        # Generar resumen y análisis de sentimiento
-        extracted_data["description"] = full_text[:500]  # Primeros 500 caracteres
+													
+								 
+        extracted_data["description"] = full_text[:500]
         extracted_data["summary"] = generate_summary(full_text)
         extracted_data["sentiment"] = analyze_sentiment(full_text)
 
+				
     logger.info(f"Análisis completado. Datos extraídos: {list(extracted_data.keys())}")
 
+    # ✅ Return corregido: solo dos valores
     return classification, extracted_data
