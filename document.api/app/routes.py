@@ -28,7 +28,9 @@ class LoginRequest(BaseModel):
     password: str
 
 
-logger = logging.getLogger(__name__)
+#logger = logging.getLogger(__name__)
+
+logger = logging.getLogger("routes")  # o el nombre del módulo
 
 router = APIRouter()
 
@@ -293,9 +295,32 @@ async def upload_document(
     try:
         # Leer el contenido del archivo
         file_content = await file.read()
+        
+        logger.info("⚡ Upload document iniciado")
+        logger.info(f"Tamaño del archivo recibido: {len(file_content)} bytes")
 
         # Subir a S3
         s3_key = await upload_file_to_s3(file_content, file.filename)
+        
+        classification, extracted_data = await analyze_document(
+            file_content, file.filename
+        )
+        
+        param1 = "FACTURACION" if classification.value == "FACTURA" else "DOCUMENTACION"
+        param2 = "PENDIENTE_REVISION"
+        
+        # Registrar en file_uploads
+        file_upload = FileUpload(
+            filename=file.filename,
+            s3_key=s3_key,
+            s3_bucket=settings.S3_BUCKET_NAME,
+            file_size=len(file_content),
+            uploaded_by=current_user.id,
+            param1=param1,
+            param2=param2,
+        )
+        db.add(file_upload)
+        await db.flush()  # para obtener file_upload.id sin hacer commit
 
         # Analizar documento con IA
         classification, extracted_data = await analyze_document(

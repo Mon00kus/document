@@ -43,6 +43,7 @@ api.interceptors.response.use(
 
           api.defaults.headers.common[ 'Authorization' ] = `Bearer ${ response.data.access_token }`;
           return api( originalRequest );
+        // eslint-disable-next-line no-unused-vars
         } catch ( refreshError )
         {
           // Si falla el refresh, logout

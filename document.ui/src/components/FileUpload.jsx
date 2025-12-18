@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
@@ -13,6 +14,7 @@ export default function FileUpload( { onUploadComplete } )
 
   const onDrop = useCallback( async ( acceptedFiles ) =>
   {
+    setUploadStatus('idle');
     const file = acceptedFiles[ 0 ];
     if ( !file ) return;
 
@@ -47,7 +49,7 @@ export default function FileUpload( { onUploadComplete } )
       {
         onUploadComplete( response.data );
       }
-      setTimeout( () => setUploadStatus( 'idle' ), 3000 );
+      //setTimeout( () => setUploadStatus( 'idle' ), 3000 );
     } catch ( error )
     {
       console.error( error );
