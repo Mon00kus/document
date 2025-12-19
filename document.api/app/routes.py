@@ -2,13 +2,14 @@
 Rutas de la API
 """
 
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
 from app.database import get_db
-from app.models import User, UserRole, FileUpload
+from app.models import EventLog, User, UserRole, FileUpload
 from app.auth_utils import (
     verify_password,
     get_password_hash,
@@ -16,11 +17,14 @@ from app.auth_utils import (
     decode_token,
     create_refresh_token,
 )
-from app.functions import upload_file_to_s3, validate_csv_file
+from app.functions import log_event, upload_file_to_s3, validate_csv_file
 from app.config import settings
 from datetime import timedelta
 import logging
 from pydantic import BaseModel
+import pandas as pd
+from fastapi.responses import StreamingResponse
+import io
 
 
 class LoginRequest(BaseModel):
@@ -302,9 +306,7 @@ async def upload_document(
         # Subir a S3
         s3_key = await upload_file_to_s3(file_content, file.filename)
         
-        classification, extracted_data = await analyze_document(
-            file_content, file.filename
-        )
+        classification, extracted_data = await analyze_document(db, file_content, file.filename)
         
         param1 = "FACTURACION" if classification.value == "FACTURA" else "DOCUMENTACION"
         param2 = "PENDIENTE_REVISION"
@@ -323,9 +325,7 @@ async def upload_document(
         await db.flush()  # para obtener file_upload.id sin hacer commit
 
         # Analizar documento con IA
-        classification, extracted_data = await analyze_document(
-            file_content, file.filename
-        )
+        classification, extracted_data = await analyze_document(db, file_content, file.filename)
 
         # Crear registro en la base de datos
         document_analysis = DocumentAnalysis(
@@ -382,6 +382,13 @@ async def upload_document(
                 "sentiment": document_analysis.sentiment,
             }
 
+        # Registrar evento en histórico
+        await log_event(
+            db,
+            event_type="UPLOAD",
+            description=f"Usuario {current_user.username} subió {file.filename}"
+        )
+            
         return response_data
 
     except Exception as e:
@@ -390,3 +397,50 @@ async def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al analizar documento: {str(e)}",
         )
+
+
+@router.get("/event-logs", summary="Consultar histórico de eventos")
+async def get_event_logs(
+    event_type: str | None = None,
+    description: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(EventLog)
+
+    if event_type:
+        query = query.where(EventLog.event_type == event_type)
+    if description:
+        query = query.where(EventLog.description.ilike(f"%{description}%"))
+    if start_date and end_date:
+        query = query.where(EventLog.created_at.between(start_date, end_date))
+
+    result = await db.execute(query.order_by(EventLog.created_at.desc()))
+    return result.scalars().all()
+  
+  
+@router.get("/event-logs/export", summary="Exportar histórico a Excel")
+async def export_event_logs(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(EventLog))
+    events = result.scalars().all()
+
+    df = pd.DataFrame([{
+        "ID": e.id,
+        "Tipo": e.event_type,
+        "Descripción": e.description,
+        "Fecha": e.created_at
+    } for e in events])
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Eventos")
+
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=event_logs.xlsx"}
+    )

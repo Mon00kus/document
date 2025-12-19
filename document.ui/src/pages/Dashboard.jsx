@@ -1,19 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import FileUpload from '../components/FileUpload';
 // eslint-disable-next-line no-unused-vars
 import { motion } from 'framer-motion';
 import { FileText, LogOut, LayoutDashboard, Database, DollarSign, Activity } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
+import EventLogTable from '../components/EventLogTable';
 
 export default function Dashboard()
 {
   const { user, logout } = useAuth();
   const [ analysisResult, setAnalysisResult ] = useState( null );
 
+  const eventLogRef = useRef();
+
   const handleUploadComplete = ( data ) =>
   {
     setAnalysisResult( data );
+    eventLogRef.current?.refreshLogs();
   };
 
   return (
@@ -160,7 +164,14 @@ export default function Dashboard()
               ) }
             </AnimatePresence>
           </div>
+
         </div>
+        
+          {/* Historico de eventos*/}
+          <div className="lg:col-span-12">
+            <EventLogTable ref={eventLogRef} />
+          </div>
+
       </main>
     </div>
   );
