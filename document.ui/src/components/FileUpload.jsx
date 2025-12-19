@@ -108,7 +108,7 @@ export default function FileUpload( { onUploadComplete } )
         </div>
 
         {/* Decorative background glow */ }
-        <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-0  from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       </div>
 
       <AnimatePresence>

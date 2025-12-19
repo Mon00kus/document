@@ -62,3 +62,16 @@ def test_download_file_from_s3_object_not_exists():
         download_file_from_s3(test_key)
 
     assert "no se pudo descargar" in str(excinfo.value).lower()
+    
+from app.services.s3_utils import get_s3_client
+
+
+def test_get_s3_client_default(monkeypatch):
+    monkeypatch.setattr("app.config.settings.AWS_REGION", "us-east-1")
+    client = get_s3_client()
+    assert client.meta.region_name == "us-east-1"
+
+def test_get_s3_client_with_endpoint(monkeypatch):
+    monkeypatch.setattr("app.config.settings.AWS_ENDPOINT_URL", "http://localhost:4566")
+    client = get_s3_client()
+    assert client.meta.endpoint_url.startswith("http://localhost:4566")
