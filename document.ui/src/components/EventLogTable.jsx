@@ -3,6 +3,10 @@ import api from '../api/client';
 
 const EventLogTable = forwardRef((props, ref) => {
   const [logs, setLogs] = useState([]);
+  const [filterType, setFilterType] = useState('');
+  const [filterText, setFilterText] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
 
   // función para consultar logs
   const fetchLogs = async () => {
@@ -30,9 +34,58 @@ const EventLogTable = forwardRef((props, ref) => {
     fetchLogs();
   }, []);
 
+  // aplicar filtros en memoria
+  const filteredLogs = logs.filter(log => {
+    const matchesType = filterType ? log.event_type === filterType : true;
+    const matchesText = filterText ? log.description.toLowerCase().includes(filterText.toLowerCase()) : true;
+    const logDate = new Date(log.created_at);
+    const matchesStart = filterStartDate ? logDate >= new Date(filterStartDate) : true;
+    //const matchesEnd = filterEndDate ? logDate <= new Date(filterEndDate) : true;
+    const endDate = filterEndDate ? new Date(filterEndDate + 'T23:59:59') : null;
+    const matchesEnd = endDate ? logDate <= endDate : true;
+    return matchesType && matchesText && matchesStart && matchesEnd;
+  });
+
   return (
     <div className="bg-[#161B22] rounded-2xl border border-gray-800 p-6 mt-8">
       <h2 className="text-xl font-bold mb-4">Histórico de Eventos</h2>
+
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-4 mb-4">
+        <select
+          value={filterType}
+          onChange={e => setFilterType(e.target.value)}
+          className="bg-gray-800 text-white p-2 rounded"
+        >
+          <option value="">Todos</option>
+          <option value="UPLOAD">UPLOAD</option>
+          <option value="ANALYSIS">ANALYSIS</option>
+        </select>
+
+        <input
+          type="text"
+          placeholder="Buscar descripción..."
+          value={filterText}
+          onChange={e => setFilterText(e.target.value)}
+          className="bg-gray-800 text-white p-2 rounded flex-1"
+        />
+
+        <input
+          type="date"
+          value={filterStartDate}
+          onChange={e => setFilterStartDate(e.target.value)}
+          className="bg-gray-800 text-white p-2 rounded"
+        />
+
+        <input
+          type="date"
+          value={filterEndDate}
+          onChange={e => setFilterEndDate(e.target.value)}
+          className="bg-gray-800 text-white p-2 rounded"
+        />
+      </div>
+
+      {/* Tabla */}
       <table className="w-full text-sm text-gray-300">
         <thead>
           <tr className="text-gray-400">
@@ -43,7 +96,7 @@ const EventLogTable = forwardRef((props, ref) => {
           </tr>
         </thead>
         <tbody>
-          {logs.map(log => (
+          {filteredLogs.map(log => (
             <tr key={log.id} className="border-t border-gray-700">
               <td>{log.id}</td>
               <td>{log.event_type}</td>
