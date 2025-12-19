@@ -40,16 +40,51 @@ const EventLogTable = forwardRef((props, ref) => {
     const matchesText = filterText ? log.description.toLowerCase().includes(filterText.toLowerCase()) : true;
     const logDate = new Date(log.created_at);
     const matchesStart = filterStartDate ? logDate >= new Date(filterStartDate) : true;
-    //const matchesEnd = filterEndDate ? logDate <= new Date(filterEndDate) : true;
     const endDate = filterEndDate ? new Date(filterEndDate + 'T23:59:59') : null;
     const matchesEnd = endDate ? logDate <= endDate : true;
+    //const matchesEnd = filterEndDate ? logDate <= new Date(filterEndDate) : true;
     return matchesType && matchesText && matchesStart && matchesEnd;
   });
 
-  return (
-    <div className="bg-[#161B22] rounded-2xl border border-gray-800 p-6 mt-8">
-      <h2 className="text-xl font-bold mb-4">Histórico de Eventos</h2>
+  const handleExport = () => {
+    if (filterStartDate && filterEndDate && filterStartDate > filterEndDate) {
+      alert("La fecha inicial no puede ser posterior a la final");
+      return;
+    }
+  
+    const token = localStorage.getItem('token');
+    // Construir query params con los filtros actuales    
+        
+    const params = new URLSearchParams();
+    if (filterType) params.append("event_type", filterType);
+    if (filterText) params.append("description", filterText);
+    if (filterStartDate) params.append("start_date", filterStartDate);
+    if (filterEndDate) params.append("end_date", filterEndDate);
 
+    console.log('Filtros enviados : ', params.toString());
+
+    fetch(`http://localhost:8000/api/v1/event-logs/export?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error("Error al exportar");
+        return res.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'event_logs.xlsx';
+        a.click();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(err => console.error("Exportación fallida:", err));
+  }
+
+  return (
+    <div className="bg-[#161B22] rounded-2xl border border-gray-800  pt-6 pl-6 pr-2 mt-6">
+      <h2 className="text-xl font-bold mb-4">Histórico de Eventos</h2>
+      
       {/* Filtros */}
       <div className="flex flex-wrap gap-4 mb-4">
         <select
@@ -83,6 +118,13 @@ const EventLogTable = forwardRef((props, ref) => {
           onChange={e => setFilterEndDate(e.target.value)}
           className="bg-gray-800 text-white p-2 rounded"
         />
+
+        <button
+        onClick={handleExport}
+        className="float-right bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+        >
+          Exportar a Excel
+        </button>
       </div>
 
       {/* Tabla */}

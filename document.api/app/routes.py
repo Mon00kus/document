@@ -2,8 +2,8 @@
 Rutas de la API
 """
 
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from datetime import datetime, time, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -423,15 +423,44 @@ async def get_event_logs(
 @router.get("/event-logs/export", summary="Exportar histórico a Excel")
 async def export_event_logs(
     db: AsyncSession = Depends(get_db),
+    event_type: str | None = Query(None),
+    description: str | None = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
 ):
-    result = await db.execute(select(EventLog))
+    print("Filtros recibidos:", event_type, description, start_date, end_date)
+     # ✅ Validación robusta de rango
+    start_dt = None
+    end_dt = None
+    if start_date:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    if end_date:
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    if start_dt and end_dt and start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="start_date no puede ser posterior a end_date")
+
+    # ✅ Construcción de query
+    query = select(EventLog)
+    if event_type:
+        query = query.where(EventLog.event_type == event_type)
+    if description:
+        query = query.where(EventLog.description.ilike(f"%{description}%"))
+    if start_dt:
+        query = query.where(EventLog.created_at >= start_dt.replace(tzinfo=timezone.utc))
+    if end_dt:
+        end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        query = query.where(EventLog.created_at <= end_dt.replace(tzinfo=timezone.utc))
+
+    result = await db.execute(query)
     events = result.scalars().all()
+    print(f"Exportando {len(events)} eventos")
 
     df = pd.DataFrame([{
         "ID": e.id,
         "Tipo": e.event_type,
         "Descripción": e.description,
-        "Fecha": e.created_at
+        #"Fecha": e.created_at
+        "Fecha": e.created_at.replace(tzinfo=None)  # 👈 aquí
     } for e in events])
 
     output = io.BytesIO()
