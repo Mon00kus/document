@@ -10,8 +10,11 @@ import io
 import pdfplumber
 
 from typing import Dict, Any, Tuple
+
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import DocumentClassification
+from app.functions import log_event
 
 from pdf2image import convert_from_bytes
 import pytesseract
@@ -353,7 +356,9 @@ def generate_summary(text: str, max_length: int = 200) -> str:
 
 
 async def analyze_document(
-    file_bytes: bytes, file_path: str
+    db: AsyncSession,    
+    file_bytes: bytes, 
+    file_path: str
 ) -> Tuple[DocumentClassification, Dict[str, Any]]:
     """
     Analiza un documento completo: extrae texto, clasifica y extrae datos.
@@ -403,6 +408,13 @@ async def analyze_document(
 
 				
     logger.info(f"Análisis completado. Datos extraídos: {list(extracted_data.keys())}")
+    
+    await log_event(
+      db,
+      event_type="ANALYSIS",
+      description=f"Documento {file_path} clasificado como {classification}"
+    )
+
 
     # ✅ Return corregido: solo dos valores
     return classification, extracted_data

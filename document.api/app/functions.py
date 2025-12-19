@@ -4,8 +4,10 @@ Funciones auxiliares para la aplicación
 
 import boto3
 from botocore.exceptions import ClientError
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 import logging
+from app.models import EventLog
 
 logger = logging.getLogger(__name__)
 
@@ -99,3 +101,12 @@ def validate_csv_file(file_content: bytes, filename: str) -> bool:
         return False
 
     return True
+
+
+async def log_event(db: AsyncSession, event_type: str, description: str):
+    event = EventLog(event_type=event_type, description=description)
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return event
+
